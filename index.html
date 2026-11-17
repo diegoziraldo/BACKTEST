@@ -46,17 +46,18 @@ th{position:sticky;top:0;background:var(--soft);font-weight:600;text-align:right
 th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
 .head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 select{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:6px 8px}
+#strat{font-weight:600;max-width:100%}
 [hidden]{display:none!important}
 </style>
 </head>
 <body>
 <main>
  <div class="top">
-  <div><h1 id="ttl">Panel de backtest</h1><p class="sub" id="per">Subí el Excel que genera el programa y mirá todos los resultados graficados.</p></div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" id="pdf" hidden>Descargar PDF</button><button class="btn" id="pick">Cargar otro Excel</button></div>
+  <div><h1 id="ttl">Panel de backtest</h1><p class="sub" id="per">Subí los Excel que genera el programa (uno por estrategia) y mirá todos los resultados graficados.</p></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label class="sub" id="stl" hidden>Estrategia <select id="strat" aria-label="Estrategia"></select></label><button class="btn" id="pdf" hidden>Descargar PDF</button><button class="btn" id="pick">Cargar Excel</button></div>
  </div>
- <input type="file" id="file" accept=".xlsx,.xls" hidden>
- <div id="drop"><h2>Arrastrá acá tu archivo backtest.xlsx</h2><p>Funciona con el Excel que crea backtest_nvda_1h.py. El archivo se lee en tu navegador y no se envía a ningún servidor.</p><button class="btn" id="pick2">Elegir archivo</button><div id="err"></div></div>
+ <input type="file" id="file" accept=".xlsx,.xls" multiple hidden>
+ <div id="drop"><h2>Arrastrá acá tus archivos .xlsx</h2><p>Funciona con los Excel que crea test.py (uno por estrategia): podés elegir varios a la vez y después cambiar entre ellos. Los archivos se leen en tu navegador y no se envían a ningún servidor.</p><button class="btn" id="pick2">Elegir archivos</button><div id="err"></div></div>
  <div id="app" hidden>
   <div class="kpis" id="kpis"></div>
   <div class="note" id="note"></div>
@@ -82,26 +83,40 @@ const pc=(v,d=1)=>F(v)?nm(v*100,d)+'%':'n/d';
 const usd=v=>F(v)?(v<0?'-':'')+'$'+nm(Math.abs(v),0):'n/d';
 const ds=d=>d instanceof Date?d.toISOString().slice(0,10):String(d).slice(0,10);
 const cl=v=>v>0?'pos':v<0?'neg':'';
-let D=null,CH=[];
+let D=null,R=[],CH=[];
+const nice=t=>String(t).replace('RESULTADOS DEL BACKTEST','').replace('ESTRATEGIA','Estrategia').replace(/[\s-]+$/,'').trim();
 
-function parse(wb){
+function parse(wb,file){
  const S=n=>{if(!wb.Sheets[n])throw new Error('Falta la hoja '+n+'. Usá el Excel generado por el programa.');return XLSX.utils.sheet_to_json(wb.Sheets[n])};
  const res=XLSX.utils.sheet_to_json(wb.Sheets.Resumen||{},{header:1}),M={};
  if(!res.length)throw new Error('Falta la hoja Resumen.');
  res.forEach(r=>{if(typeof r[0]==='string')M[r[0]]=r.slice(1)});
- D={title:res[0][0],period:res[1]?res[1][0]:'',M,eq:S('Equity'),ops:S('Operaciones'),mes:S('Mensual'),ent:S('Por_Entrada')};
+ return {file,title:res[0][0],period:res[1]?res[1][0]:'',M,eq:S('Equity'),ops:S('Operaciones'),mes:S('Mensual'),ent:S('Por_Entrada')};
 }
-function load(f){
- const r=new FileReader();
- r.onload=e=>{try{parse(XLSX.read(e.target.result,{type:'array',cellDates:true}));render();}catch(x){$('#err').textContent=x.message;}};
- r.readAsArrayBuffer(f);
+// agrega (o reemplaza si ya estaba el mismo archivo) una estrategia a la lista
+function add(wb,file){const o=parse(wb,file),i=R.findIndex(r=>r.file===file);i>=0?R[i]=o:R.push(o);return o}
+function fillSel(){
+ const s=$('#strat');s.innerHTML=R.map((r,i)=>`<option value="${i}">${nice(r.title)||r.file}</option>`).join('');
+ s.value=R.indexOf(D);$('#stl').hidden=R.length<2;
+}
+function pick(o){D=o;fillSel();render()}
+const rd=f=>new Promise((ok,no)=>{const r=new FileReader();r.onload=e=>ok(e.target.result);r.onerror=()=>no(new Error('No se pudo leer '+f.name));r.readAsArrayBuffer(f)});
+async function load(files){
+ const errs=[];let first=null;
+ for(const f of files){
+  try{const o=add(XLSX.read(await rd(f),{type:'array',cellDates:true}),f.name);first=first||o}
+  catch(x){errs.push(f.name+': '+x.message)}
+ }
+ $('#err').textContent=errs.join(' · ');
+ if(errs.length&&!$('#app').hidden)alert(errs.join('\n'));
+ if(first)pick(first);
 }
 const k=(n,i=0)=>D.M[n]?D.M[n][i]:undefined;
 
 function render(){
  CH.forEach(c=>c.destroy());CH=[];
  $('#drop').hidden=true;$('#app').hidden=false;
- $('#ttl').textContent=String(D.title).replace('RESULTADOS DEL BACKTEST','').replace('ESTRATEGIA','Estrategia').trim()||'Panel de backtest';
+ $('#ttl').textContent=nice(D.title)||'Panel de backtest';
  $('#per').textContent=D.period;
  const ops=D.ops,tot=ops.reduce((a,o)=>a+o.resultado_usd,0);
  const kp=[
@@ -173,12 +188,25 @@ function table(){
 }
 $('#flt').onchange=table;
 const fi=$('#file');['#pick','#pick2'].forEach(s=>$(s).onclick=()=>fi.click());
-fi.onchange=()=>fi.files[0]&&load(fi.files[0]);
+fi.onchange=()=>{if(fi.files.length)load([...fi.files]);fi.value=''};
+$('#strat').onchange=e=>pick(R[+e.target.value]);
 const dr=$('#drop');
 ['dragenter','dragover'].forEach(e=>document.addEventListener(e,x=>{x.preventDefault();dr.classList.add('on')}));
 ['dragleave','drop'].forEach(e=>document.addEventListener(e,x=>{x.preventDefault();dr.classList.remove('on')}));
-document.addEventListener('drop',x=>{const f=x.dataTransfer.files[0];if(f)load(f)});
-if(location.protocol.startsWith('http'))fetch('backtest.xlsx').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>{parse(XLSX.read(b,{type:'array',cellDates:true}));render();}).catch(()=>{});
+document.addEventListener('drop',x=>{const f=[...x.dataTransfer.files].filter(a=>/\.xlsx?$/i.test(a.name));if(f.length)load(f)});
+// Con servidor (http): carga resultados/index.json (lo escribe test.py) y todos los Excel que lista.
+// Si no existe, intenta con backtest.xlsx como antes.
+async function autoload(){
+ let files=[];
+ try{const r=await fetch('resultados/index.json');if(r.ok)files=(await r.json()).map(f=>'resultados/'+encodeURIComponent(f))}catch(e){}
+ if(!files.length)files=['backtest.xlsx'];
+ for(const f of files){
+  try{const r=await fetch(f);if(r.ok)add(XLSX.read(await r.arrayBuffer(),{type:'array',cellDates:true}),decodeURIComponent(f.split('/').pop()))}catch(e){}
+ }
+ R.sort((a,b)=>nice(a.title).localeCompare(nice(b.title),'es'));
+ if(R.length)pick(R[0]);
+}
+if(location.protocol.startsWith('http'))autoload();
 Chart.defaults.animation=false;
 let busy=false;
 async function pdf(){
@@ -210,7 +238,7 @@ async function pdf(){
   doc.autoTable({html:'#t2',startY:y+3,styles:{fontSize:6.2,cellPadding:1},headStyles:{fillColor:[11,143,132]},margin:{left:M,right:M}});
   const n=doc.getNumberOfPages();
   for(let i=1;i<=n;i++){doc.setPage(i);doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(120);doc.text('Página '+i+' de '+n,W-M,291,{align:'right'});}
-  doc.save('informe_backtest.pdf');
+  doc.save('informe_'+String(D.file||'backtest').replace(/\.xlsx?$/i,'')+'.pdf');
  }catch(x){alert('No se pudo crear el PDF: '+x.message)}
  finally{prev?root.setAttribute('data-theme',prev):root.removeAttribute('data-theme');$('#flt').value=f;busy=false;render();b.disabled=false;b.textContent='Descargar PDF';}
 }
