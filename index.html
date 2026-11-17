@@ -176,6 +176,7 @@ const dr=$('#drop');
 ['dragenter','dragover'].forEach(e=>document.addEventListener(e,x=>{x.preventDefault();dr.classList.add('on')}));
 ['dragleave','drop'].forEach(e=>document.addEventListener(e,x=>{x.preventDefault();dr.classList.remove('on')}));
 document.addEventListener('drop',x=>{const f=x.dataTransfer.files[0];if(f)load(f)});
+if(location.protocol.startsWith('http'))fetch('backtest.xlsx').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>{parse(XLSX.read(b,{type:'array',cellDates:true}));render();}).catch(()=>{});
 const redo=()=>{if(D)render()};
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',redo);
 new MutationObserver(redo).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
