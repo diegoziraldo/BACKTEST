@@ -6,6 +6,8 @@
 <title>Panel de backtest</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 <style>
 :root{--bg:#eef2f6;--card:#fff;--tx:#12202e;--mut:#5f6f81;--bd:#dbe3ec;--grid:#e6ecf2;--st:#0b8f84;--bh:#c98a12;--ls:#d4493f;--soft:#f6f9fc}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e161f;--card:#16212d;--tx:#e7eef6;--mut:#92a3b6;--bd:#243445;--grid:#203040;--st:#2dd4bf;--bh:#f2b84b;--ls:#ff7a70;--soft:#1b2836}}
@@ -51,7 +53,7 @@ select{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-
 <main>
  <div class="top">
   <div><h1 id="ttl">Panel de backtest</h1><p class="sub" id="per">Subí el Excel que genera el programa y mirá todos los resultados graficados.</p></div>
-  <button class="btn" id="pick">Cargar otro Excel</button>
+  <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" id="pdf" hidden>Descargar PDF</button><button class="btn" id="pick">Cargar otro Excel</button></div>
  </div>
  <input type="file" id="file" accept=".xlsx,.xls" hidden>
  <div id="drop"><h2>Arrastrá acá tu archivo backtest.xlsx</h2><p>Funciona con el Excel que crea backtest_nvda_1h.py. El archivo se lee en tu navegador y no se envía a ningún servidor.</p><button class="btn" id="pick2">Elegir archivo</button><div id="err"></div></div>
@@ -112,7 +114,7 @@ function render(){
   ['Ganadoras',pc(k('% ganadoras (win rate)'),1),'Payoff '+nm(k('Payoff (ganancia/perdida)')),''],
   ['Profit factor',nm(k('Profit factor')),'Racha perdedora máx.: '+nm(k('Max perdidas consecutivas'),0),'']
  ];
- $('#kpis').innerHTML=kp.map(x=>`<div class="kpi"><span>${x[0]}</span><b class="${x[3]}">${x[1]}</b><small>${x[2]}</small></div>`).join('');
+ D.kp=kp;$('#pdf').hidden=false;$('#kpis').innerHTML=kp.map(x=>`<div class="kpi"><span>${x[0]}</span><b class="${x[3]}">${x[1]}</b><small>${x[2]}</small></div>`).join('');
  if(ops.length){
   const b=ops.reduce((a,o)=>o.resultado_usd>a.resultado_usd?o:a),sin=tot-b.resultado_usd;
   const w=ops.filter(o=>o.resultado_usd>0&&o!==b).reduce((a,o)=>a+o.resultado_usd,0),l=-ops.filter(o=>o.resultado_usd<=0).reduce((a,o)=>a+o.resultado_usd,0);
@@ -177,7 +179,43 @@ const dr=$('#drop');
 ['dragleave','drop'].forEach(e=>document.addEventListener(e,x=>{x.preventDefault();dr.classList.remove('on')}));
 document.addEventListener('drop',x=>{const f=x.dataTransfer.files[0];if(f)load(f)});
 if(location.protocol.startsWith('http'))fetch('backtest.xlsx').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>{parse(XLSX.read(b,{type:'array',cellDates:true}));render();}).catch(()=>{});
-const redo=()=>{if(D)render()};
+Chart.defaults.animation=false;
+let busy=false;
+async function pdf(){
+ if(!D)return;
+ const b=$('#pdf'),root=document.documentElement,prev=root.getAttribute('data-theme'),f=$('#flt').value;
+ b.disabled=true;b.textContent='Generando PDF…';busy=true;
+ try{
+  root.setAttribute('data-theme','light');$('#flt').value='';render();
+  await new Promise(r=>setTimeout(r,120));
+  const doc=new jspdf.jsPDF({unit:'mm',format:'a4'}),W=210,M=12;let y=M;
+  doc.setFont('helvetica','bold');doc.setFontSize(18);doc.text($('#ttl').textContent,M,y+6);y+=11;
+  doc.setFont('helvetica','normal');doc.setFontSize(9.5);doc.setTextColor(95,111,129);doc.text($('#per').textContent,M,y);y+=4;
+  doc.setTextColor(18,32,46);
+  doc.autoTable({startY:y,head:[['Indicador','Estrategia','Referencia']],body:D.kp.map(x=>[x[0],x[1],x[2]]),styles:{fontSize:9,cellPadding:1.8},headStyles:{fillColor:[11,143,132]},margin:{left:M,right:M}});
+  y=doc.lastAutoTable.finalY+5;
+  if(!$('#note').hidden){doc.setFontSize(9.5);const t=doc.splitTextToSize($('#note').textContent,W-2*M);doc.text(t,M,y);y+=t.length*4.6+4;}
+  for(const row of [['c1'],['c2','c3'],['c4','c5'],['c6','c7']]){
+   const w=row.length===1?W-2*M:(W-2*M-6)/2;let hm=0;
+   const im=row.map(id=>{const cv=$('#'+id),h=w*cv.height/cv.width;hm=Math.max(hm,h);return [id,cv.toDataURL('image/png'),h]});
+   if(y+hm+10>285){doc.addPage();y=M}
+   im.forEach(([id,img,h],i)=>{const x=M+i*(w+6);doc.setFont('helvetica','bold');doc.setFontSize(10);doc.text($('#'+id).closest('.panel').querySelector('h2').textContent,x,y+4);doc.addImage(img,'PNG',x,y+6,w,h)});
+   y+=hm+12;
+  }
+  doc.addPage();y=M;
+  doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text('Comparación por tipo de entrada',M,y+4);
+  doc.autoTable({html:'#t1',startY:y+7,styles:{fontSize:8,cellPadding:1.5},headStyles:{fillColor:[11,143,132]},margin:{left:M,right:M}});
+  y=doc.lastAutoTable.finalY+9;
+  doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text('Todas las operaciones',M,y);
+  doc.autoTable({html:'#t2',startY:y+3,styles:{fontSize:6.2,cellPadding:1},headStyles:{fillColor:[11,143,132]},margin:{left:M,right:M}});
+  const n=doc.getNumberOfPages();
+  for(let i=1;i<=n;i++){doc.setPage(i);doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(120);doc.text('Página '+i+' de '+n,W-M,291,{align:'right'});}
+  doc.save('informe_backtest.pdf');
+ }catch(x){alert('No se pudo crear el PDF: '+x.message)}
+ finally{prev?root.setAttribute('data-theme',prev):root.removeAttribute('data-theme');$('#flt').value=f;busy=false;render();b.disabled=false;b.textContent='Descargar PDF';}
+}
+$('#pdf').onclick=pdf;
+const redo=()=>{if(D&&!busy)render()};
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',redo);
 new MutationObserver(redo).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
 </script>
