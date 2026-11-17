@@ -47,6 +47,7 @@ th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
 .head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 select{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:6px 8px}
 #strat{font-weight:600;max-width:100%}
+#t0 tbody tr{cursor:pointer}#t0 tr.cur td{background:var(--soft);font-weight:600}#t0 tbody tr:hover td{background:var(--soft)}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -62,6 +63,7 @@ select{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-
   <div class="kpis" id="kpis"></div>
   <div class="note" id="note"></div>
   <div class="grid">
+   <div class="panel full" id="cmp" hidden><h2>Comparación de estrategias</h2><p class="sub">Retorno acumulado de cada Excel cargado. Hacé click en una fila para ver su detalle.</p><div class="ch tall"><canvas id="c8"></canvas></div><div class="scroll"><table id="t0"></table></div></div>
    <div class="panel full"><h2>Capital: estrategia contra comprar y mantener</h2><p class="sub">Evolución del capital inicial en USD.</p><div class="ch tall"><canvas id="c1"></canvas></div></div>
    <div class="panel"><h2>Caída desde el máximo</h2><p class="sub">Cuánto estuvo el capital por debajo de su pico.</p><div class="ch"><canvas id="c2"></canvas></div></div>
    <div class="panel"><h2>Resultado por operación</h2><p class="sub">Ganancia o pérdida en USD, en orden cronológico.</p><div class="ch"><canvas id="c3"></canvas></div></div>
@@ -135,7 +137,7 @@ function render(){
   const w=ops.filter(o=>o.resultado_usd>0&&o!==b).reduce((a,o)=>a+o.resultado_usd,0),l=-ops.filter(o=>o.resultado_usd<=0).reduce((a,o)=>a+o.resultado_usd,0);
   $('#note').innerHTML=`La mejor operación (n.º ${b.n}, ${b.tipo}) ganó <b>${usd(b.resultado_usd)}</b> de un total de <b>${usd(tot)}</b>. Sin ella, el resultado sería <b class="${cl(sin)}">${usd(sin)}</b> y el profit factor ${nm(l>0?w/l:NaN)}.`;
  }else $('#note').hidden=true;
- draw();table();
+ draw();table();compare();
 }
 function base(){
  const m=css('--mut'),g=css('--grid');
@@ -175,6 +177,20 @@ function draw(){
  o.scales.y1={position:'right',grid:{display:false},ticks:{color:css('--mut')},title:{display:true,text:'Profit factor',color:css('--mut')}};
  mk('c7',{type:'bar',data:{labels:en.map(x=>x.tipo.replace('_',' ')),datasets:[{label:'Resultado neto (USD)',data:en.map(x=>x.pnl_usd),backgroundColor:en.map(x=>x.pnl_usd>=0?st:ls),yAxisID:'y'},{type:'line',label:'Profit factor',data:en.map(x=>x.profit_factor),borderColor:bh,backgroundColor:bh,pointRadius:6,showLine:false,yAxisID:'y1'}]},options:o});
 }
+function compare(){
+ const p=$('#cmp');p.hidden=R.length<2;if(R.length<2)return;
+ const v=(o,n,i=0)=>o.M[n]?o.M[n][i]:undefined,pal=[css('--st'),css('--bh'),css('--ls'),'#6c8cd4','#a96cd4','#4aa564','#d46ca0','#8a8a8a'];
+ const ser=R.map(o=>{const c0=v(o,'Capital inicial (USD)')||(o.eq[0]&&o.eq[0].equity_estrategia),m=new Map();o.eq.forEach(r=>m.set(ds(r.fecha),r.equity_estrategia/c0-1));return m});
+ const days=[...new Set(ser.flatMap(m=>[...m.keys()]))].sort();
+ const sets=R.map((o,i)=>{const ks=[...ser[i].keys()].sort(),a=ks[0],z=ks[ks.length-1];let last=null;
+  return{label:nice(o.title),data:days.map(d=>{if(d<a||d>z)return null;if(ser[i].has(d))last=ser[i].get(d);return last}),borderColor:pal[i%pal.length],backgroundColor:pal[i%pal.length],borderWidth:o===D?2.8:1.4,pointRadius:0,tension:0}});
+ const o=base();o.scales.y.ticks.callback=x=>pc(x,0);o.plugins.tooltip={callbacks:{label:c=>c.dataset.label+': '+pc(c.parsed.y,1)}};
+ mk('c8',{type:'line',data:{labels:days,datasets:sets},options:o});
+ const cols=[['Estrategia'],['Retorno total','Retorno total','p'],['CAGR','CAGR (anualizado)','p'],['Caída máx.','Max drawdown','p'],['Sharpe','Sharpe (rf=0)','n'],['Operaciones','Cantidad de operaciones','i'],['Ganadoras','% ganadoras (win rate)','p'],['Profit factor','Profit factor','n'],['Payoff','Payoff (ganancia/perdida)','n'],['Neto USD','Resultado neto (USD)','u']];
+ const f=(x,t)=>t==='p'?pc(x,1):t==='u'?usd(x):t==='i'?nm(x,0):nm(x),c=(x,t)=>t==='p'||t==='u'?cl(x):'';
+ $('#t0').innerHTML='<thead><tr>'+cols.map(x=>`<th>${x[0]}</th>`).join('')+'</tr></thead><tbody>'+R.map((o,i)=>`<tr data-i="${i}" class="${o===D?'cur':''}"><td>${nice(o.title)||o.file}</td>`+cols.slice(1).map(x=>{const y=v(o,x[1]);return `<td class="${c(y,x[2])}">${f(y,x[2])}</td>`}).join('')+'</tr>').join('')+'</tbody>';
+}
+$('#t0').onclick=e=>{const r=e.target.closest('tr[data-i]');if(r)pick(R[+r.dataset.i])};
 function table(){
  const P=['win_rate','avg_return','avg_win','avg_loss','mfe','mae','avg_mfe','avg_mae','resultado','riesgo_pct'];
  const cols=[['tipo','Entrada'],['trades','Operaciones',0],['win_rate','Ganadoras','p'],['profit_factor','Profit factor'],['avg_return','Retorno medio','p'],['pnl_usd','Neto USD','u'],['payoff_ratio','Payoff'],['avg_win','Ganancia media','p'],['avg_loss','Pérdida media','p'],['average_duration','Duración (velas)',1]];
