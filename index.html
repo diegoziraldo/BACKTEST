@@ -45,25 +45,23 @@ th,td{padding:7px 11px;text-align:right;border-bottom:1px solid var(--bd)}
 th{position:sticky;top:0;background:var(--soft);font-weight:600;text-align:right}
 th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
 .head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.filters{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
 select{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:6px 8px}
-#strat{font-weight:600;max-width:100%}
-#t0 tbody tr{cursor:pointer}#t0 tr.cur td{background:var(--soft);font-weight:600}#t0 tbody tr:hover td{background:var(--soft)}
 [hidden]{display:none!important}
 </style>
 </head>
 <body>
 <main>
  <div class="top">
-  <div><h1 id="ttl">Panel de backtest</h1><p class="sub" id="per">Subí los Excel que genera el programa (uno por estrategia) y mirá todos los resultados graficados.</p></div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label class="sub" id="stl" hidden>Estrategia <select id="strat" aria-label="Estrategia"></select></label><button class="btn" id="pdf" hidden>Descargar PDF</button><button class="btn" id="pick">Cargar Excel</button></div>
+  <div><h1 id="ttl">Panel de backtest</h1><p class="sub" id="per">Subí el Excel que genera el programa y mirá todos los resultados graficados.</p></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" id="pdf" hidden>Descargar PDF</button><button class="btn" id="pick">Cargar otro Excel</button></div>
  </div>
- <input type="file" id="file" accept=".xlsx,.xls" multiple hidden>
- <div id="drop"><h2>Arrastrá acá tus archivos .xlsx</h2><p>Funciona con los Excel que crea test.py (uno por estrategia): podés elegir varios a la vez y después cambiar entre ellos. Los archivos se leen en tu navegador y no se envían a ningún servidor.</p><button class="btn" id="pick2">Elegir archivos</button><div id="err"></div></div>
+ <input type="file" id="file" accept=".xlsx,.xls" hidden>
+ <div id="drop"><h2>Arrastrá acá tu archivo backtest.xlsx</h2><p>Funciona con el Excel que crea backtest_nvda_1h.py. El archivo se lee en tu navegador y no se envía a ningún servidor.</p><button class="btn" id="pick2">Elegir archivo</button><div id="err"></div></div>
  <div id="app" hidden>
   <div class="kpis" id="kpis"></div>
   <div class="note" id="note"></div>
   <div class="grid">
-   <div class="panel full" id="cmp" hidden><h2>Comparación de estrategias</h2><p class="sub">Retorno acumulado de cada Excel cargado. Hacé click en una fila para ver su detalle.</p><div class="ch tall"><canvas id="c8"></canvas></div><div class="scroll"><table id="t0"></table></div></div>
    <div class="panel full"><h2>Capital: estrategia contra comprar y mantener</h2><p class="sub">Evolución del capital inicial en USD.</p><div class="ch tall"><canvas id="c1"></canvas></div></div>
    <div class="panel"><h2>Caída desde el máximo</h2><p class="sub">Cuánto estuvo el capital por debajo de su pico.</p><div class="ch"><canvas id="c2"></canvas></div></div>
    <div class="panel"><h2>Resultado por operación</h2><p class="sub">Ganancia o pérdida en USD, en orden cronológico.</p><div class="ch"><canvas id="c3"></canvas></div></div>
@@ -72,7 +70,7 @@ select{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-
    <div class="panel"><h2>Cómo terminan las operaciones</h2><p class="sub">Motivo de salida.</p><div class="ch"><canvas id="c6"></canvas></div></div>
    <div class="panel"><h2>Entrada 1 contra Entrada 2</h2><p class="sub">Resultado neto en USD y factor de ganancia (profit factor).</p><div class="ch"><canvas id="c7"></canvas></div></div>
    <div class="panel full"><h2>Comparación por tipo de entrada</h2><div class="scroll"><table id="t1"></table></div></div>
-   <div class="panel full"><div class="head"><div><h2>Todas las operaciones</h2><p class="sub" id="cnt"></p></div><label class="sub">Mostrar <select id="flt"><option value="">todas</option><option>ENTRADA_1</option><option>ENTRADA_2</option></select></label></div><div class="scroll"><table id="t2"></table></div></div>
+   <div class="panel full"><div class="head"><div><h2>Todas las operaciones</h2><p class="sub" id="cnt"></p></div><div class="filters"><label class="sub">Entrada <select id="flt"><option value="">todas</option><option>ENTRADA_1</option><option>ENTRADA_2</option></select></label><label class="sub">Resultado <select id="flt2"><option value="">todas</option><option value="g">ganadoras</option><option value="p">perdedoras</option></select></label></div></div><div class="scroll"><table id="t2"></table></div></div>
   </div>
  </div>
 </main>
@@ -85,40 +83,26 @@ const pc=(v,d=1)=>F(v)?nm(v*100,d)+'%':'n/d';
 const usd=v=>F(v)?(v<0?'-':'')+'$'+nm(Math.abs(v),0):'n/d';
 const ds=d=>d instanceof Date?d.toISOString().slice(0,10):String(d).slice(0,10);
 const cl=v=>v>0?'pos':v<0?'neg':'';
-let D=null,R=[],CH=[];
-const nice=t=>String(t).replace('RESULTADOS DEL BACKTEST','').replace('ESTRATEGIA','Estrategia').replace(/[\s-]+$/,'').trim();
+let D=null,CH=[];
 
-function parse(wb,file){
+function parse(wb){
  const S=n=>{if(!wb.Sheets[n])throw new Error('Falta la hoja '+n+'. Usá el Excel generado por el programa.');return XLSX.utils.sheet_to_json(wb.Sheets[n])};
  const res=XLSX.utils.sheet_to_json(wb.Sheets.Resumen||{},{header:1}),M={};
  if(!res.length)throw new Error('Falta la hoja Resumen.');
  res.forEach(r=>{if(typeof r[0]==='string')M[r[0]]=r.slice(1)});
- return {file,title:res[0][0],period:res[1]?res[1][0]:'',M,eq:S('Equity'),ops:S('Operaciones'),mes:S('Mensual'),ent:S('Por_Entrada')};
+ D={title:res[0][0],period:res[1]?res[1][0]:'',M,eq:S('Equity'),ops:S('Operaciones'),mes:S('Mensual'),ent:S('Por_Entrada')};
 }
-// agrega (o reemplaza si ya estaba el mismo archivo) una estrategia a la lista
-function add(wb,file){const o=parse(wb,file),i=R.findIndex(r=>r.file===file);i>=0?R[i]=o:R.push(o);return o}
-function fillSel(){
- const s=$('#strat');s.innerHTML=R.map((r,i)=>`<option value="${i}">${nice(r.title)||r.file}</option>`).join('');
- s.value=R.indexOf(D);$('#stl').hidden=R.length<2;
-}
-function pick(o){D=o;fillSel();render()}
-const rd=f=>new Promise((ok,no)=>{const r=new FileReader();r.onload=e=>ok(e.target.result);r.onerror=()=>no(new Error('No se pudo leer '+f.name));r.readAsArrayBuffer(f)});
-async function load(files){
- const errs=[];let first=null;
- for(const f of files){
-  try{const o=add(XLSX.read(await rd(f),{type:'array',cellDates:true}),f.name);first=first||o}
-  catch(x){errs.push(f.name+': '+x.message)}
- }
- $('#err').textContent=errs.join(' · ');
- if(errs.length&&!$('#app').hidden)alert(errs.join('\n'));
- if(first)pick(first);
+function load(f){
+ const r=new FileReader();
+ r.onload=e=>{try{parse(XLSX.read(e.target.result,{type:'array',cellDates:true}));render();}catch(x){$('#err').textContent=x.message;}};
+ r.readAsArrayBuffer(f);
 }
 const k=(n,i=0)=>D.M[n]?D.M[n][i]:undefined;
 
 function render(){
  CH.forEach(c=>c.destroy());CH=[];
  $('#drop').hidden=true;$('#app').hidden=false;
- $('#ttl').textContent=nice(D.title)||'Panel de backtest';
+ $('#ttl').textContent=String(D.title).replace('RESULTADOS DEL BACKTEST','').replace('ESTRATEGIA','Estrategia').trim()||'Panel de backtest';
  $('#per').textContent=D.period;
  const ops=D.ops,tot=ops.reduce((a,o)=>a+o.resultado_usd,0);
  const kp=[
@@ -137,7 +121,7 @@ function render(){
   const w=ops.filter(o=>o.resultado_usd>0&&o!==b).reduce((a,o)=>a+o.resultado_usd,0),l=-ops.filter(o=>o.resultado_usd<=0).reduce((a,o)=>a+o.resultado_usd,0);
   $('#note').innerHTML=`La mejor operación (n.º ${b.n}, ${b.tipo}) ganó <b>${usd(b.resultado_usd)}</b> de un total de <b>${usd(tot)}</b>. Sin ella, el resultado sería <b class="${cl(sin)}">${usd(sin)}</b> y el profit factor ${nm(l>0?w/l:NaN)}.`;
  }else $('#note').hidden=true;
- draw();table();compare();
+ draw();table();
 }
 function base(){
  const m=css('--mut'),g=css('--grid');
@@ -177,60 +161,37 @@ function draw(){
  o.scales.y1={position:'right',grid:{display:false},ticks:{color:css('--mut')},title:{display:true,text:'Profit factor',color:css('--mut')}};
  mk('c7',{type:'bar',data:{labels:en.map(x=>x.tipo.replace('_',' ')),datasets:[{label:'Resultado neto (USD)',data:en.map(x=>x.pnl_usd),backgroundColor:en.map(x=>x.pnl_usd>=0?st:ls),yAxisID:'y'},{type:'line',label:'Profit factor',data:en.map(x=>x.profit_factor),borderColor:bh,backgroundColor:bh,pointRadius:6,showLine:false,yAxisID:'y1'}]},options:o});
 }
-function compare(){
- const p=$('#cmp');p.hidden=R.length<2;if(R.length<2)return;
- const v=(o,n,i=0)=>o.M[n]?o.M[n][i]:undefined,pal=[css('--st'),css('--bh'),css('--ls'),'#6c8cd4','#a96cd4','#4aa564','#d46ca0','#8a8a8a'];
- const ser=R.map(o=>{const c0=v(o,'Capital inicial (USD)')||(o.eq[0]&&o.eq[0].equity_estrategia),m=new Map();o.eq.forEach(r=>m.set(ds(r.fecha),r.equity_estrategia/c0-1));return m});
- const days=[...new Set(ser.flatMap(m=>[...m.keys()]))].sort();
- const sets=R.map((o,i)=>{const ks=[...ser[i].keys()].sort(),a=ks[0],z=ks[ks.length-1];let last=null;
-  return{label:nice(o.title),data:days.map(d=>{if(d<a||d>z)return null;if(ser[i].has(d))last=ser[i].get(d);return last}),borderColor:pal[i%pal.length],backgroundColor:pal[i%pal.length],borderWidth:o===D?2.8:1.4,pointRadius:0,tension:0}});
- const o=base();o.scales.y.ticks.callback=x=>pc(x,0);o.plugins.tooltip={callbacks:{label:c=>c.dataset.label+': '+pc(c.parsed.y,1)}};
- mk('c8',{type:'line',data:{labels:days,datasets:sets},options:o});
- const cols=[['Estrategia'],['Retorno total','Retorno total','p'],['CAGR','CAGR (anualizado)','p'],['Caída máx.','Max drawdown','p'],['Sharpe','Sharpe (rf=0)','n'],['Operaciones','Cantidad de operaciones','i'],['Ganadoras','% ganadoras (win rate)','p'],['Profit factor','Profit factor','n'],['Payoff','Payoff (ganancia/perdida)','n'],['Neto USD','Resultado neto (USD)','u']];
- const f=(x,t)=>t==='p'?pc(x,1):t==='u'?usd(x):t==='i'?nm(x,0):nm(x),c=(x,t)=>t==='p'||t==='u'?cl(x):'';
- $('#t0').innerHTML='<thead><tr>'+cols.map(x=>`<th>${x[0]}</th>`).join('')+'</tr></thead><tbody>'+R.map((o,i)=>`<tr data-i="${i}" class="${o===D?'cur':''}"><td>${nice(o.title)||o.file}</td>`+cols.slice(1).map(x=>{const y=v(o,x[1]);return `<td class="${c(y,x[2])}">${f(y,x[2])}</td>`}).join('')+'</tr>').join('')+'</tbody>';
-}
-$('#t0').onclick=e=>{const r=e.target.closest('tr[data-i]');if(r)pick(R[+r.dataset.i])};
 function table(){
  const P=['win_rate','avg_return','avg_win','avg_loss','mfe','mae','avg_mfe','avg_mae','resultado','riesgo_pct'];
  const cols=[['tipo','Entrada'],['trades','Operaciones',0],['win_rate','Ganadoras','p'],['profit_factor','Profit factor'],['avg_return','Retorno medio','p'],['pnl_usd','Neto USD','u'],['payoff_ratio','Payoff'],['avg_win','Ganancia media','p'],['avg_loss','Pérdida media','p'],['average_duration','Duración (velas)',1]];
  const cell=(v,t,d)=>t==='p'?pc(v,1):t==='u'?usd(v):typeof v==='number'?nm(v,d===undefined?2:d):(v??'');
  $('#t1').innerHTML='<tr>'+cols.map(c=>`<th>${c[1]}</th>`).join('')+'</tr>'+D.ent.map(r=>'<tr>'+cols.map(c=>{const v=r[c[0]],t=typeof c[2]==='string'?c[2]:'';return `<td class="${t==='u'||t==='p'?cl(v):''}">${cell(v,t,c[2])}</td>`}).join('')+'</tr>').join('');
- const f=$('#flt').value,rows=D.ops.filter(o=>!f||o.tipo===f);
- $('#cnt').textContent=rows.length+' operaciones';
- const oc=[['n','N.º'],['tipo','Entrada'],['fecha_entrada','Fecha entrada'],['fecha_salida','Fecha salida'],['entrada','Precio entrada','n'],['stop','Stop','n'],['target','Target','n'],['salida','Precio salida','n'],['resultado','Retorno','p'],['resultado_usd','Resultado USD','u'],['riesgo_pct','Riesgo','p'],['motivo_salida','Motivo'],['duracion_barras','Velas','i']];
+ const f=$('#flt').value,g=$('#flt2').value;
+ const rows=D.ops.filter(o=>(!f||o.tipo===f)&&(!g||(g==='g'?o.resultado_usd>0:o.resultado_usd<=0)));
+ const nw=rows.filter(o=>o.resultado_usd>0).length,net=rows.reduce((a,o)=>a+o.resultado_usd,0);
+ $('#cnt').textContent=rows.length+' operaciones · '+nw+' ganadoras · '+(rows.length-nw)+' perdedoras · neto '+usd(net);
+ const oc=[['n','N.º'],['tipo','Entrada'],['fecha_entrada','Fecha entrada'],['fecha_salida','Fecha salida'],['entrada','Precio entrada','n'],['stop','Stop','n'],['target','Target','n'],['salida','Precio salida','n'],['resultado','Retorno','p'],['resultado_usd','Resultado USD','u'],['_res','Resultado','w'],['riesgo_pct','Riesgo','p'],['motivo_salida','Motivo'],['duracion_barras','Velas','i']];
  const oc2=(v,t)=>t==='p'?pc(v,2):t==='u'?usd(v):t==='n'?nm(v,2):t==='i'?nm(v,0):v instanceof Date?ds(v):(v??'');
- $('#t2').innerHTML='<tr>'+oc.map(c=>`<th>${c[1]}</th>`).join('')+'</tr>'+rows.map(r=>'<tr>'+oc.map(c=>`<td class="${c[2]==='p'&&c[0]==='resultado'||c[2]==='u'?cl(r[c[0]]):''}">${oc2(r[c[0]],c[2])}</td>`).join('')+'</tr>').join('');
+ const td=(r,c)=>{if(c[2]==='w'){const win=r.resultado_usd>0;return `<td class="${win?'pos':'neg'}">${win?'Ganadora':'Perdedora'}</td>`}
+  return `<td class="${c[2]==='p'&&c[0]==='resultado'||c[2]==='u'?cl(r[c[0]]):''}">${oc2(r[c[0]],c[2])}</td>`};
+ $('#t2').innerHTML='<tr>'+oc.map(c=>`<th>${c[1]}</th>`).join('')+'</tr>'+rows.map(r=>'<tr>'+oc.map(c=>td(r,c)).join('')+'</tr>').join('');
 }
-$('#flt').onchange=table;
+$('#flt').onchange=table;$('#flt2').onchange=table;
 const fi=$('#file');['#pick','#pick2'].forEach(s=>$(s).onclick=()=>fi.click());
-fi.onchange=()=>{if(fi.files.length)load([...fi.files]);fi.value=''};
-$('#strat').onchange=e=>pick(R[+e.target.value]);
+fi.onchange=()=>fi.files[0]&&load(fi.files[0]);
 const dr=$('#drop');
 ['dragenter','dragover'].forEach(e=>document.addEventListener(e,x=>{x.preventDefault();dr.classList.add('on')}));
 ['dragleave','drop'].forEach(e=>document.addEventListener(e,x=>{x.preventDefault();dr.classList.remove('on')}));
-document.addEventListener('drop',x=>{const f=[...x.dataTransfer.files].filter(a=>/\.xlsx?$/i.test(a.name));if(f.length)load(f)});
-// Con servidor (http): carga resultados/index.json (lo escribe test.py) y todos los Excel que lista.
-// Si no existe, intenta con backtest.xlsx como antes.
-async function autoload(){
- let files=[];
- try{const r=await fetch('resultados/index.json');if(r.ok)files=(await r.json()).map(f=>'resultados/'+encodeURIComponent(f))}catch(e){}
- if(!files.length)files=['backtest.xlsx'];
- for(const f of files){
-  try{const r=await fetch(f);if(r.ok)add(XLSX.read(await r.arrayBuffer(),{type:'array',cellDates:true}),decodeURIComponent(f.split('/').pop()))}catch(e){}
- }
- R.sort((a,b)=>nice(a.title).localeCompare(nice(b.title),'es'));
- if(R.length)pick(R[0]);
-}
-if(location.protocol.startsWith('http'))autoload();
+document.addEventListener('drop',x=>{const f=x.dataTransfer.files[0];if(f)load(f)});
+if(location.protocol.startsWith('http'))fetch('backtest.xlsx').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>{parse(XLSX.read(b,{type:'array',cellDates:true}));render();}).catch(()=>{});
 Chart.defaults.animation=false;
 let busy=false;
 async function pdf(){
  if(!D)return;
- const b=$('#pdf'),root=document.documentElement,prev=root.getAttribute('data-theme'),f=$('#flt').value;
+ const b=$('#pdf'),root=document.documentElement,prev=root.getAttribute('data-theme'),f=$('#flt').value,g=$('#flt2').value;
  b.disabled=true;b.textContent='Generando PDF…';busy=true;
  try{
-  root.setAttribute('data-theme','light');$('#flt').value='';render();
+  root.setAttribute('data-theme','light');$('#flt').value='';$('#flt2').value='';render();
   await new Promise(r=>setTimeout(r,120));
   const doc=new jspdf.jsPDF({unit:'mm',format:'a4'}),W=210,M=12;let y=M;
   doc.setFont('helvetica','bold');doc.setFontSize(18);doc.text($('#ttl').textContent,M,y+6);y+=11;
@@ -254,9 +215,9 @@ async function pdf(){
   doc.autoTable({html:'#t2',startY:y+3,styles:{fontSize:6.2,cellPadding:1},headStyles:{fillColor:[11,143,132]},margin:{left:M,right:M}});
   const n=doc.getNumberOfPages();
   for(let i=1;i<=n;i++){doc.setPage(i);doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(120);doc.text('Página '+i+' de '+n,W-M,291,{align:'right'});}
-  doc.save('informe_'+String(D.file||'backtest').replace(/\.xlsx?$/i,'')+'.pdf');
+  doc.save('informe_backtest.pdf');
  }catch(x){alert('No se pudo crear el PDF: '+x.message)}
- finally{prev?root.setAttribute('data-theme',prev):root.removeAttribute('data-theme');$('#flt').value=f;busy=false;render();b.disabled=false;b.textContent='Descargar PDF';}
+ finally{prev?root.setAttribute('data-theme',prev):root.removeAttribute('data-theme');$('#flt').value=f;$('#flt2').value=g;busy=false;render();b.disabled=false;b.textContent='Descargar PDF';}
 }
 $('#pdf').onclick=pdf;
 const redo=()=>{if(D&&!busy)render()};
