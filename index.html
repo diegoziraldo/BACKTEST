@@ -81,7 +81,10 @@ const F=Number.isFinite;
 const nm=(v,d=2)=>F(v)?v.toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d}):'n/d';
 const pc=(v,d=1)=>F(v)?nm(v*100,d)+'%':'n/d';
 const usd=v=>F(v)?(v<0?'-':'')+'$'+nm(Math.abs(v),0):'n/d';
-const ds=d=>d instanceof Date?d.toISOString().slice(0,10):String(d).slice(0,10);
+const pad=n=>String(n).padStart(2,'0');
+const ds=d=>d instanceof Date?d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()):String(d).slice(0,10);
+const tm=d=>d instanceof Date?pad(d.getHours())+':'+pad(d.getMinutes()):String(d).slice(11,16);
+const fx=d=>D&&D.intra?ds(d)+' '+tm(d):ds(d);
 const cl=v=>v>0?'pos':v<0?'neg':'';
 let D=null,CH=[];
 
@@ -91,6 +94,8 @@ function parse(wb){
  if(!res.length)throw new Error('Falta la hoja Resumen.');
  res.forEach(r=>{if(typeof r[0]==='string')M[r[0]]=r.slice(1)});
  D={title:res[0][0],period:res[1]?res[1][0]:'',M,eq:S('Equity'),ops:S('Operaciones'),mes:S('Mensual'),ent:S('Por_Entrada')};
+ const hh=d=>d instanceof Date?(d.getHours()||d.getMinutes()):/\d\d:\d\d/.test(String(d).slice(11,16))&&String(d).slice(11,16)!=='00:00';
+ D.intra=D.eq.some(r=>hh(r.fecha))||D.ops.some(o=>hh(o.fecha_entrada)||hh(o.fecha_salida));
 }
 function load(f){
  const r=new FileReader();
@@ -132,7 +137,7 @@ function base(){
 const mk=(id,cfg)=>CH.push(new Chart($('#'+id),cfg));
 function draw(){
  const st=css('--st'),bh=css('--bh'),ls=css('--ls'),eq=D.eq;
- const step=Math.max(1,Math.ceil(eq.length/1200)),E=eq.filter((_,i)=>i%step===0||i===eq.length-1),lab=E.map(r=>ds(r.fecha));
+ const step=Math.max(1,Math.ceil(eq.length/1200)),E=eq.filter((_,i)=>i%step===0||i===eq.length-1),lab=E.map(r=>fx(r.fecha));
  const line=(l,key,c,fill)=>({label:l,data:E.map(r=>r[key]),borderColor:c,backgroundColor:c+'33',fill:!!fill,borderWidth:1.6,pointRadius:0,tension:0});
  let o=base();o.scales.y.ticks.callback=v=>'$'+nm(v,0);
  o.plugins.tooltip={callbacks:{label:c=>c.dataset.label+': '+usd(c.parsed.y)}};
@@ -170,8 +175,8 @@ function table(){
  const rows=D.ops.filter(o=>(!f||o.tipo===f)&&(!g||(g==='g'?o.resultado_usd>0:o.resultado_usd<=0)));
  const nw=rows.filter(o=>o.resultado_usd>0).length,net=rows.reduce((a,o)=>a+o.resultado_usd,0);
  $('#cnt').textContent=rows.length+' operaciones · '+nw+' ganadoras · '+(rows.length-nw)+' perdedoras · neto '+usd(net);
- const oc=[['n','N.º'],['tipo','Entrada'],['fecha_entrada','Fecha entrada'],['fecha_salida','Fecha salida'],['entrada','Precio entrada','n'],['stop','Stop','n'],['target','Target','n'],['salida','Precio salida','n'],['resultado','Retorno','p'],['resultado_usd','Resultado USD','u'],['_res','Resultado','w'],['riesgo_pct','Riesgo','p'],['motivo_salida','Motivo'],['duracion_barras','Velas','i']];
- const oc2=(v,t)=>t==='p'?pc(v,2):t==='u'?usd(v):t==='n'?nm(v,2):t==='i'?nm(v,0):v instanceof Date?ds(v):(v??'');
+ const oc=[['n','N.º'],['tipo','Entrada'],['fecha_entrada',D.intra?'Fecha y hora entrada':'Fecha entrada'],['fecha_salida',D.intra?'Fecha y hora salida':'Fecha salida'],['entrada','Precio entrada','n'],['stop','Stop','n'],['target','Target','n'],['salida','Precio salida','n'],['resultado','Retorno','p'],['resultado_usd','Resultado USD','u'],['_res','Resultado','w'],['riesgo_pct','Riesgo','p'],['motivo_salida','Motivo'],['duracion_barras','Velas','i']];
+ const oc2=(v,t)=>t==='p'?pc(v,2):t==='u'?usd(v):t==='n'?nm(v,2):t==='i'?nm(v,0):v instanceof Date?fx(v):(v??'');
  const td=(r,c)=>{if(c[2]==='w'){const win=r.resultado_usd>0;return `<td class="${win?'pos':'neg'}">${win?'Ganadora':'Perdedora'}</td>`}
   return `<td class="${c[2]==='p'&&c[0]==='resultado'||c[2]==='u'?cl(r[c[0]]):''}">${oc2(r[c[0]],c[2])}</td>`};
  $('#t2').innerHTML='<tr>'+oc.map(c=>`<th>${c[1]}</th>`).join('')+'</tr>'+rows.map(r=>'<tr>'+oc.map(c=>td(r,c)).join('')+'</tr>').join('');
