@@ -47,6 +47,16 @@ th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
 .head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 .filters{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
 select{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:6px 8px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.chip{display:inline-flex;border:1px solid var(--bd);border-radius:999px;background:var(--card);overflow:hidden}
+.chip button{background:none;border:0;color:var(--tx);padding:7px 12px;font:600 13px system-ui;cursor:pointer}
+.chip button+button{padding:7px 10px;color:var(--mut);border-left:1px solid var(--bd)}
+.chip.on{border-color:var(--st);box-shadow:0 0 0 1px var(--st)}
+.chip.on button:first-child{color:var(--st)}
+.chip button:focus-visible,.lnk:focus-visible{outline:3px solid var(--bh);outline-offset:-2px}
+.lnk{background:none;border:0;color:var(--st);font:600 13px system-ui;cursor:pointer;padding:0;text-align:left}
+tr.act td{background:var(--soft)}
+#err:empty{display:none}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -54,11 +64,14 @@ select{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-
 <main>
  <div class="top">
   <div><h1 id="ttl">Panel de backtest</h1><p class="sub" id="per">Subí el Excel que genera el programa y mirá todos los resultados graficados.</p></div>
-  <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" id="pdf" hidden>Descargar PDF</button><button class="btn" id="pick">Cargar otro Excel</button></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" id="pdf" hidden>Descargar PDF</button><button class="btn" id="pick">Agregar Excel</button></div>
  </div>
- <input type="file" id="file" accept=".xlsx,.xls" hidden>
- <div id="drop"><h2>Arrastrá acá tu archivo backtest.xlsx</h2><p>Funciona con el Excel que crea backtest_nvda_1h.py. El archivo se lee en tu navegador y no se envía a ningún servidor.</p><button class="btn" id="pick2">Elegir archivo</button><div id="err"></div></div>
+ <input type="file" id="file" accept=".xlsx,.xls" multiple hidden>
+ <div id="err"></div>
+ <div id="drop"><h2>Arrastrá acá tus archivos .xlsx</h2><p>Podés soltar o elegir varios a la vez (uno por estrategia). Funciona con los Excel que crean backtest_nvda_1h.py y backtest_multi.py. Los archivos se leen en tu navegador y no se envían a ningún servidor.</p><button class="btn" id="pick2">Elegir archivos</button></div>
  <div id="app" hidden>
+  <div class="tabs" id="tabs" hidden></div>
+  <div class="panel" id="cmpbox" hidden style="margin-bottom:16px"><h2>Comparativa de estrategias</h2><p class="sub">Tocá una estrategia para ver su detalle completo.</p><div class="scroll"><table id="cmp"></table></div></div>
   <div class="kpis" id="kpis"></div>
   <div class="note" id="note"></div>
   <div class="grid">
@@ -82,32 +95,74 @@ const nm=(v,d=2)=>F(v)?v.toLocaleString('es-AR',{minimumFractionDigits:d,maximum
 const pc=(v,d=1)=>F(v)?nm(v*100,d)+'%':'n/d';
 const usd=v=>F(v)?(v<0?'-':'')+'$'+nm(Math.abs(v),0):'n/d';
 const pad=n=>String(n).padStart(2,'0');
-const ds=d=>d instanceof Date?d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()):String(d).slice(0,10);
-const tm=d=>d instanceof Date?pad(d.getHours())+':'+pad(d.getMinutes()):String(d).slice(11,16);
+const xd=v=>typeof v==='number'?new Date(Math.round((v-25569)*1440)*60000):v;
+const ds=d=>d instanceof Date?d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate()):String(d).slice(0,10);
+const tm=d=>d instanceof Date?pad(d.getUTCHours())+':'+pad(d.getUTCMinutes()):String(d).slice(11,16);
 const fx=d=>D&&D.intra?ds(d)+' '+tm(d):ds(d);
 const cl=v=>v>0?'pos':v<0?'neg':'';
 let D=null,CH=[];
 
-function parse(wb){
+function parse(wb,name){
  const S=n=>{if(!wb.Sheets[n])throw new Error('Falta la hoja '+n+'. Usá el Excel generado por el programa.');return XLSX.utils.sheet_to_json(wb.Sheets[n])};
  const res=XLSX.utils.sheet_to_json(wb.Sheets.Resumen||{},{header:1}),M={};
  if(!res.length)throw new Error('Falta la hoja Resumen.');
  res.forEach(r=>{if(typeof r[0]==='string')M[r[0]]=r.slice(1)});
- D={title:res[0][0],period:res[1]?res[1][0]:'',M,eq:S('Equity'),ops:S('Operaciones'),mes:S('Mensual'),ent:S('Por_Entrada')};
- const hh=d=>d instanceof Date?(d.getHours()||d.getMinutes()):/\d\d:\d\d/.test(String(d).slice(11,16))&&String(d).slice(11,16)!=='00:00';
- D.intra=D.eq.some(r=>hh(r.fecha))||D.ops.some(o=>hh(o.fecha_entrada)||hh(o.fecha_salida));
+ const ds0={name,title:res[0][0],period:res[1]?res[1][0]:'',M,eq:S('Equity'),ops:S('Operaciones'),mes:S('Mensual'),ent:S('Por_Entrada')};
+ const fix=(a,ks)=>a.forEach(r=>ks.forEach(k=>{if(typeof r[k]==='number')r[k]=xd(r[k])}));
+ fix(ds0.eq,['fecha']);fix(ds0.ops,['fecha_senal','fecha_entrada','fecha_salida']);
+ const hh=d=>d instanceof Date?(d.getUTCHours()||d.getUTCMinutes()):/\d\d:\d\d/.test(String(d).slice(11,16))&&String(d).slice(11,16)!=='00:00';
+ ds0.intra=ds0.eq.some(r=>hh(r.fecha))||ds0.ops.some(o=>hh(o.fecha_entrada)||hh(o.fecha_salida));
+ return ds0;
 }
-function load(f){
- const r=new FileReader();
- r.onload=e=>{try{parse(XLSX.read(e.target.result,{type:'array',cellDates:true}));render();}catch(x){$('#err').textContent=x.message;}};
- r.readAsArrayBuffer(f);
+let DS=[],ACT=0;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const tt=d=>String(d.title).replace('RESULTADOS DEL BACKTEST','').replace('ESTRATEGIA','Estrategia').trim()||d.name||'Backtest';
+function readFile(f){
+ return new Promise(res=>{
+  const r=new FileReader();
+  r.onload=e=>{try{res({d:parse(XLSX.read(e.target.result,{type:'array'}),f.name)})}catch(x){res({err:f.name+': '+x.message})}};
+  r.onerror=()=>res({err:f.name+': no se pudo leer el archivo'});
+  r.readAsArrayBuffer(f);
+ });
 }
-const k=(n,i=0)=>D.M[n]?D.M[n][i]:undefined;
+async function loadMany(files){
+ const list=[...files].filter(f=>/\.xlsx?$/i.test(f.name));
+ if(!list.length){$('#err').textContent='Elegí archivos Excel (.xlsx).';return}
+ const out=await Promise.all(list.map(readFile));
+ const errs=out.filter(o=>o.err).map(o=>o.err);
+ let first=-1;
+ out.forEach(o=>{if(!o.d)return;
+  const i=DS.findIndex(x=>x.name===o.d.name);
+  const at=i>=0?i:DS.push(o.d)-1;
+  if(i>=0)DS[i]=o.d;
+  if(first<0)first=at;
+ });
+ $('#err').textContent=errs.join(' · ');
+ if(first>=0)select(first);
+}
+function select(i){ACT=i;D=DS[i];render();}
+function removeDs(i){
+ const was=ACT;DS.splice(i,1);
+ if(!DS.length){D=null;ACT=0;CH.forEach(c=>c.destroy());CH=[];$('#app').hidden=true;$('#drop').hidden=false;$('#pdf').hidden=true;$('#ttl').textContent='Panel de backtest';$('#per').textContent='Subí los Excel que genera el programa y mirá todos los resultados graficados.';return}
+ select(i<was?was-1:Math.min(was,DS.length-1));
+}
+const kd=(d,n,i=0)=>d.M[n]?d.M[n][i]:undefined;
+const k=(n,i=0)=>kd(D,n,i);
+function tabs(){
+ const many=DS.length>1;
+ $('#tabs').hidden=!many;$('#cmpbox').hidden=!many;
+ if(!many){$('#tabs').innerHTML='';$('#cmp').innerHTML='';return}
+ $('#tabs').innerHTML=DS.map((d,i)=>`<span class="chip${i===ACT?' on':''}"><button data-s="${i}" title="${esc(d.name)}">${esc(tt(d))}</button><button data-x="${i}" aria-label="Quitar ${esc(d.name)}" title="Quitar">×</button></span>`).join('');
+ const hd=['Estrategia','Operaciones','Ganadoras','Retorno','Comprar y mantener','Caída máx.','Sharpe','Profit factor'];
+ $('#cmp').innerHTML='<tr>'+hd.map(h=>`<th>${h}</th>`).join('')+'</tr>'+DS.map((d,i)=>{
+  const r=kd(d,'Retorno total'),b=kd(d,'Retorno total',1);
+  return `<tr class="${i===ACT?'act':''}"><td><button class="lnk" data-s="${i}" title="${esc(d.name)}">${esc(tt(d))}</button></td><td>${nm(kd(d,'Cantidad de operaciones'),0)}</td><td>${pc(kd(d,'% ganadoras (win rate)'),1)}</td><td class="${cl(r)}">${pc(r,1)}</td><td class="${cl(b)}">${pc(b,1)}</td><td class="neg">${pc(kd(d,'Max drawdown'),1)}</td><td>${nm(kd(d,'Sharpe (rf=0)'))}</td><td>${nm(kd(d,'Profit factor'))}</td></tr>`}).join('');
+}
 
 function render(){
  CH.forEach(c=>c.destroy());CH=[];
- $('#drop').hidden=true;$('#app').hidden=false;
- $('#ttl').textContent=String(D.title).replace('RESULTADOS DEL BACKTEST','').replace('ESTRATEGIA','Estrategia').trim()||'Panel de backtest';
+ $('#drop').hidden=true;$('#app').hidden=false;tabs();
+ $('#ttl').textContent=tt(D);
  $('#per').textContent=D.period;
  const ops=D.ops,tot=ops.reduce((a,o)=>a+o.resultado_usd,0);
  const kp=[
@@ -172,9 +227,9 @@ function table(){
  const cell=(v,t,d)=>t==='p'?pc(v,1):t==='u'?usd(v):typeof v==='number'?nm(v,d===undefined?2:d):(v??'');
  $('#t1').innerHTML='<tr>'+cols.map(c=>`<th>${c[1]}</th>`).join('')+'</tr>'+D.ent.map(r=>'<tr>'+cols.map(c=>{const v=r[c[0]],t=typeof c[2]==='string'?c[2]:'';return `<td class="${t==='u'||t==='p'?cl(v):''}">${cell(v,t,c[2])}</td>`}).join('')+'</tr>').join('');
  const f=$('#flt').value,g=$('#flt2').value;
- const rows=D.ops.filter(o=>(!f||o.tipo===f)&&(!g||(g==='g'?o.resultado_usd>0:o.resultado_usd<=0)));
- const nw=rows.filter(o=>o.resultado_usd>0).length,net=rows.reduce((a,o)=>a+o.resultado_usd,0);
- $('#cnt').textContent=rows.length+' operaciones · '+nw+' ganadoras · '+(rows.length-nw)+' perdedoras · neto '+usd(net);
+ const pool=D.ops.filter(o=>!f||o.tipo===f),rows=pool.filter(o=>!g||(g==='g'?o.resultado_usd>0:o.resultado_usd<=0));
+ const nw=pool.filter(o=>o.resultado_usd>0).length,net=rows.reduce((a,o)=>a+o.resultado_usd,0);
+ $('#cnt').textContent=rows.length+' de '+pool.length+' operaciones · '+nw+' ganadoras · '+(pool.length-nw)+' perdedoras · neto de lo mostrado '+usd(net);
  const oc=[['n','N.º'],['tipo','Entrada'],['fecha_entrada',D.intra?'Fecha y hora entrada':'Fecha entrada'],['fecha_salida',D.intra?'Fecha y hora salida':'Fecha salida'],['entrada','Precio entrada','n'],['stop','Stop','n'],['target','Target','n'],['salida','Precio salida','n'],['resultado','Retorno','p'],['resultado_usd','Resultado USD','u'],['_res','Resultado','w'],['riesgo_pct','Riesgo','p'],['motivo_salida','Motivo'],['duracion_barras','Velas','i']];
  const oc2=(v,t)=>t==='p'?pc(v,2):t==='u'?usd(v):t==='n'?nm(v,2):t==='i'?nm(v,0):v instanceof Date?fx(v):(v??'');
  const td=(r,c)=>{if(c[2]==='w'){const win=r.resultado_usd>0;return `<td class="${win?'pos':'neg'}">${win?'Ganadora':'Perdedora'}</td>`}
@@ -183,12 +238,14 @@ function table(){
 }
 $('#flt').onchange=table;$('#flt2').onchange=table;
 const fi=$('#file');['#pick','#pick2'].forEach(s=>$(s).onclick=()=>fi.click());
-fi.onchange=()=>fi.files[0]&&load(fi.files[0]);
+fi.onchange=()=>{const fl=[...fi.files];fi.value='';if(fl.length)loadMany(fl)};
+const nav=e=>{const x=e.target.closest('[data-x]');if(x){removeDs(+x.dataset.x);return}const b=e.target.closest('[data-s]');if(b)select(+b.dataset.s)};
+$('#tabs').onclick=nav;$('#cmp').onclick=nav;
 const dr=$('#drop');
 ['dragenter','dragover'].forEach(e=>document.addEventListener(e,x=>{x.preventDefault();dr.classList.add('on')}));
 ['dragleave','drop'].forEach(e=>document.addEventListener(e,x=>{x.preventDefault();dr.classList.remove('on')}));
-document.addEventListener('drop',x=>{const f=x.dataTransfer.files[0];if(f)load(f)});
-if(location.protocol.startsWith('http'))fetch('backtest.xlsx').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>{parse(XLSX.read(b,{type:'array',cellDates:true}));render();}).catch(()=>{});
+document.addEventListener('drop',x=>{const fl=[...x.dataTransfer.files];if(fl.length)loadMany(fl)});
+if(location.protocol.startsWith('http'))fetch('backtest.xlsx').then(r=>r.ok?r.arrayBuffer():Promise.reject()).then(b=>{DS.push(parse(XLSX.read(b,{type:'array'}),'backtest.xlsx'));select(0);}).catch(()=>{});
 Chart.defaults.animation=false;
 let busy=false;
 async function pdf(){
